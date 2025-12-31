@@ -1,0 +1,205 @@
+version: "3.9"
+
+services:
+  # ============== Infrastructure ==============
+  postgres:
+    image: postgres:16-alpine
+    container_name: fbi-postgres
+    environment:
+      POSTGRES_DB: fbi_crime
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+    ports:
+      - "49001:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U pipeline -d fbi_crime" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: fbi-redis
+    ports:
+      - "49002:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: fbi-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "49003:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ============== Backend APIs (Dual-Instance) ==============
+  api-dashboard:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-api-dashboard
+    ports:
+      - "49080:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - REDIS_URL=redis://redis:6379
+      - ES_URL=http://elasticsearch:9200
+      - READ_ONLY_MODE=true
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api-admin:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-api-admin
+    ports:
+      - "49081:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - REDIS_URL=redis://redis:6379
+      - ES_URL=http://elasticsearch:9200
+      - READ_ONLY_MODE=false
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  # ============== Workers ==============
+  fetcher-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-fetcher-1
+    command: python -m backend.src.crime_fetcher
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - REDIS_URL=redis://redis:6379
+      - WORKER_PARTITION=1
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+    stop_grace_period: 30s
+
+  fetcher-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-fetcher-2
+    command: python -m backend.src.crime_fetcher
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - REDIS_URL=redis://redis:6379
+      - WORKER_PARTITION=2
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+    stop_grace_period: 30s
+
+  heavy-lift:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-heavy-lift
+    command: python -m backend.src.heavy_lift_worker
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+    stop_grace_period: 60s
+
+  aggregator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fbi-aggregator
+    command: python -c "import asyncio; from backend.src.aggregator import Aggregator; asyncio.run(Aggregator().aggregate_all_counties())"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=fbi_crime
+      - POSTGRES_USER=pipeline
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secretpassword}
+      - ES_URL=http://elasticsearch:9200
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - elasticsearch
+    profiles:
+      - tools
+
+  # ============== Optional Local Frontend (Containerized) ==============
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fbi-frontend
+    ports:
+      - "49084:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:49080
+    depends_on:
+      - api-dashboard
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  es_data:
