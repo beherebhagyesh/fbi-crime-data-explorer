@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { getOffenseConfig, OffenseCode, normalizeOffenseCode } from '@/lib/offenseConfig';
 import CrimeStatsCard from '../CrimeStatsCard';
 import DetailedContextModal from '../DetailedContextModal';
+import { DataModeConfig, calculateDisplayValue, CalculatedValue } from '../DataModeSelector';
 
 interface StateSummary {
     state_abbr: string;
@@ -15,19 +16,23 @@ interface StateSummary {
 interface NationalViewProps {
     selectedOffense: OffenseCode;
     year: number;
+    dataMode: DataModeConfig;
     onSelectState: (stateAbbr: string) => void;
 }
 
 export default function NationalView({
     selectedOffense,
     year,
+    dataMode,
     onSelectState,
 }: NationalViewProps) {
+
     const [states, setStates] = useState<StateSummary[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [nationalStats, setNationalStats] = useState<any>(null);
     const [allStats, setAllStats] = useState<any[]>([]);
+    const [aggregations, setAggregations] = useState<Record<string, any>>({});
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [selectedDetailOffense, setSelectedDetailOffense] = useState<OffenseCode>(selectedOffense);
 
@@ -97,14 +102,34 @@ export default function NationalView({
                 console.error('Failed to fetch national stats:', err);
             }
         };
+
+        const fetchAggregations = async () => {
+            try {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:49080';
+                const response = await fetch(`${apiUrl}/api/stats/aggregations/national/NATIONAL_US`);
+                if (response.ok) {
+                    const data = await response.json();
+                    // Convert array to map by offense code
+                    const aggMap: Record<string, any> = {};
+                    data.forEach((agg: any) => {
+                        aggMap[agg.offense.toUpperCase()] = agg;
+                    });
+                    setAggregations(aggMap);
+                }
+            } catch (err) {
+                console.error('Failed to fetch aggregations:', err);
+            }
+        };
+
         fetchNationalStats();
+        fetchAggregations();
     }, [selectedOffense]);
 
     const totalAgencies = states.reduce((sum: number, s: StateSummary) => sum + s.agency_count, 0);
     const totalCounties = states.reduce((sum: number, s: StateSummary) => sum + s.county_count, 0);
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-fade-in h-full overflow-y-auto pr-2 custom-scrollbar">
             {/* Header - Always shown */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-4">
@@ -166,15 +191,45 @@ export default function NationalView({
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                         {/* Card cell - spans 2 rows on larger screens */}
                         <div className="row-span-2 flex flex-col gap-4">
-                            <CrimeStatsCard
-                                isLoading={!nationalStats}
-                                offenseCode={selectedOffense}
-                                count={nationalStats?.stats_2024?.total || 0}
-                                year={nationalStats?.stats_2024?.year || 2024}
-                                agenciesReporting={nationalStats?.stats_2024?.agencies_reporting || totalAgencies}
-                                agenciesTotal={totalAgencies}
-                                onDetailClick={() => setIsDetailModalOpen(true)}
-                            />
+                            {(() => {
+                                // Build yearly data from yearly_trend array
+                                const yearlyData: Record<number, number> = {};
+                                if (nationalStats?.yearly_trend) {
+                                    nationalStats.yearly_trend.forEach((item: { year: number; count: number }) => {
+                                        yearlyData[item.year] = item.count;
+                                    });
+                                }
+
+                                // Get count for selected year
+                                const selectedYearCount = yearlyData[dataMode.year] || 0;
+
+                                // Calculate display value based on dataMode
+                                const calculatedVal = calculateDisplayValue(yearlyData, dataMode);
+
+                                // Generate display label
+                                const getDisplayLabel = () => {
+                                    if (dataMode.mode === 'single') return `${dataMode.year} Data`;
+                                    if (dataMode.mode === 'growth') return `${dataMode.year - 1} → ${dataMode.year}`;
+                                    const startYear = Math.max(2020, dataMode.year - (dataMode.range || 3) + 1);
+                                    return `${startYear}-${dataMode.year}`;
+                                };
+
+                                return (
+                                    <CrimeStatsCard
+                                        isLoading={!nationalStats}
+                                        offenseCode={selectedOffense}
+                                        count={selectedYearCount}
+                                        year={dataMode.year}
+                                        agenciesReporting={totalAgencies}
+                                        agenciesTotal={totalAgencies}
+                                        onDetailClick={() => setIsDetailModalOpen(true)}
+                                        calculatedValue={dataMode.mode !== 'single' ? calculatedVal : undefined}
+                                        displayMode={dataMode.mode}
+                                        displayLabel={getDisplayLabel()}
+                                    />
+                                );
+                            })()}
+
                             <div className="card bg-[var(--accent-primary)]/10 border-[var(--accent-primary)]">
                                 <p className="text-xs text-[var(--text-secondary)]">
                                     <strong>📊 Note:</strong> Viewing <strong style={{ color: offense?.color }}>{offense?.label}</strong> data.
@@ -271,33 +326,141 @@ export default function NationalView({
                     <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                         <span>📊</span>
                         <span>Crime Statistics by Offense</span>
+                        <span className="text-sm font-normal text-[var(--text-muted)]">
+                            ({dataMode.mode === 'single' ? `${dataMode.year} Data` :
+                                dataMode.mode === 'sum' ? `${dataMode.year - (dataMode.range || 3) + 1}-${dataMode.year} Sum` :
+                                    dataMode.mode === 'avg' ? `${dataMode.year - (dataMode.range || 3) + 1}-${dataMode.year} Average` :
+                                        dataMode.mode === 'growth' ? `YoY Growth` :
+                                            dataMode.mode === 'min' ? `Lowest Year` :
+                                                dataMode.mode === 'max' ? `Highest Year` : `${dataMode.year} Data`
+                            })
+                        </span>
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {Object.values(
-                            allStats.reduce((acc: any, stat: any) => {
+                        {(() => {
+                            // Group stats by offense, prioritizing selected year
+                            const offenseStats = allStats.reduce((acc: any, stat: any) => {
                                 const offenseKey = stat.offense.toUpperCase();
-                                if (!acc[offenseKey] || stat.year > acc[offenseKey].year) {
+
+                                // Skip entries with no count
+                                if (!stat.total_count || stat.total_count === 0) {
+                                    return acc;
+                                }
+
+                                // If we don't have this offense yet, add it
+                                if (!acc[offenseKey]) {
                                     acc[offenseKey] = stat;
+                                } else {
+                                    // Prefer the selected year, otherwise keep closest year
+                                    const currentDiff = Math.abs(acc[offenseKey].year - dataMode.year);
+                                    const newDiff = Math.abs(stat.year - dataMode.year);
+
+                                    if (stat.year === dataMode.year || newDiff < currentDiff) {
+                                        acc[offenseKey] = stat;
+                                    }
                                 }
                                 return acc;
-                            }, {} as Record<string, any>)
-                        ).map((stat: any) => (
-                            <CrimeStatsCard
-                                key={stat.offense}
-                                offenseCode={stat.offense.toUpperCase() as OffenseCode}
-                                count={stat.total_count}
-                                year={stat.year}
-                                agenciesReporting={100}
-                                agenciesTotal={100}
-                                onDetailClick={() => {
-                                    setSelectedDetailOffense(stat.offense.toUpperCase() as OffenseCode);
-                                    setIsDetailModalOpen(true);
-                                }}
-                            />
-                        ))}
+                            }, {} as Record<string, any>);
+
+                            // Filter out any remaining entries with no valid data
+                            const validStats = Object.values(offenseStats).filter(
+                                (stat: any) => stat.total_count && stat.total_count > 0
+                            );
+
+                            return validStats
+                                .filter((stat: any) => {
+                                    // Only render if we have a valid offense config
+                                    const config = getOffenseConfig(stat.offense.toUpperCase() as OffenseCode);
+                                    return config !== null && config !== undefined;
+                                })
+                                .map((stat: any) => {
+                                    const offenseKey = stat.offense.toUpperCase();
+                                    const agg = aggregations[offenseKey];
+
+                                    // Build calculated value based on dataMode
+                                    let calculatedVal: CalculatedValue | undefined;
+                                    let displayLabel = `${stat.year} Data`;
+                                    let displayCount = stat.total_count;
+                                    let displayYear = stat.year;
+
+                                    if (dataMode.mode !== 'single' && agg) {
+                                        const yearCounts = agg.year_counts || {};
+
+                                        if (dataMode.mode === 'sum') {
+                                            calculatedVal = { value: agg.sum_total, isNA: false };
+                                            displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Sum`;
+                                        } else if (dataMode.mode === 'avg') {
+                                            calculatedVal = { value: Math.round(agg.avg_annual), isNA: false };
+                                            displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Avg`;
+                                        } else if (dataMode.mode === 'growth') {
+                                            if (agg.growth_pct !== null) {
+                                                calculatedVal = {
+                                                    value: agg.growth_pct,
+                                                    isNA: false,
+                                                    prefix: agg.growth_pct >= 0 ? '+' : '',
+                                                    suffix: '%'
+                                                };
+                                                displayLabel = `${agg.growth_prev_year || agg.latest_year - 1} → ${agg.latest_year}`;
+                                            } else {
+                                                calculatedVal = { value: 0, isNA: true };
+                                                displayLabel = 'N/A';
+                                            }
+                                        } else if (dataMode.mode === 'min') {
+                                            calculatedVal = {
+                                                value: agg.min_count,
+                                                isNA: false,
+                                                label: `${agg.min_year}`
+                                            };
+                                            displayLabel = `Lowest: ${agg.min_year}`;
+                                        } else if (dataMode.mode === 'max') {
+                                            calculatedVal = {
+                                                value: agg.max_count,
+                                                isNA: false,
+                                                label: `${agg.max_year}`
+                                            };
+                                            displayLabel = `Highest: ${agg.max_year}`;
+                                        }
+                                    } else if (dataMode.mode === 'single' && agg?.year_counts) {
+                                        // For single year, get the count for the selected year from aggregations
+                                        const yearCount = agg.year_counts[dataMode.year];
+                                        if (yearCount) {
+                                            displayCount = yearCount;
+                                            displayYear = dataMode.year;
+                                        }
+                                    }
+
+                                    return (
+                                        <div key={stat.offense} className="relative">
+                                            {/* Show warning if not exact year match (only for single mode) */}
+                                            {dataMode.mode === 'single' && stat.year !== dataMode.year && (
+                                                <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-500 text-xs">
+                                                    {stat.year} data
+                                                </div>
+                                            )}
+                                            <CrimeStatsCard
+                                                offenseCode={stat.offense.toUpperCase() as OffenseCode}
+                                                count={displayCount}
+                                                year={displayYear}
+                                                agenciesReporting={100}
+                                                agenciesTotal={100}
+                                                calculatedValue={calculatedVal}
+                                                displayMode={dataMode.mode}
+                                                displayLabel={displayLabel}
+                                                onDetailClick={() => {
+                                                    setSelectedDetailOffense(stat.offense.toUpperCase() as OffenseCode);
+                                                    setIsDetailModalOpen(true);
+                                                }}
+                                            />
+                                        </div>
+                                    );
+                                });
+
+
+                        })()}
                     </div>
                 </div>
             )}
+
 
             {/* ALL Offenses View - State Grid */}
             {selectedOffense === 'ALL' && (

@@ -385,10 +385,27 @@ async def get_offense_details(level_id: str, offense_code: str):
                 "importance": "medium"
             })
 
-        # 5. Build Response
+        # 5. Build Agency Contributions (only for county level)
+        agency_contributions = []
+        if is_county:
+            # Group by agency for the latest year
+            agency_latest = {}
+            for r in responses:
+                if r.year == latest_year:
+                    agency_latest[r.ori] = (r.actual_count or 0)
+            
+            for ori, count in agency_latest.items():
+                agency_contributions.append({
+                    "ori": ori,
+                    "name": agency_map.get(ori, ori),
+                    "count": count
+                })
+            # Sort by count desc
+            agency_contributions.sort(key=lambda x: x["count"], reverse=True)
+
         chart_trend = [{"year": y, "count": yearly_totals[y], "clearances": yearly_clearances.get(y, 0)} for y in sorted(yearly_totals.keys())]
         monthly_list = [{"date": m, "count": monthly_flat[m]["count"], "clearances": monthly_flat[m]["clearances"]} for m in sorted(monthly_flat.keys())]
-        
+
         final_coverage_list = yearly_coverage.get(latest_year, [100])
         avg_coverage = sum(final_coverage_list) / len(final_coverage_list) if final_coverage_list else 100
 
@@ -398,6 +415,7 @@ async def get_offense_details(level_id: str, offense_code: str):
             "level": "National" if is_national else "State" if is_state else "County",
             "yearly_trend": chart_trend,
             "monthly_breakdown": monthly_list,
+            "agency_contribution": agency_contributions,
             "inferences": inferences,
             "stats_2024": {
                 "total": v_latest,
@@ -407,4 +425,30 @@ async def get_offense_details(level_id: str, offense_code: str):
                 "coverage": avg_coverage,
                 "year": latest_year
             }
+        }
+
+
+@router.get("/agency/{ori}")
+async def get_agency_detail(ori: str):
+    """Get granular details for a specific agency."""
+    async with get_async_session() as session:
+        query = select(Agency).where(Agency.ori == ori)
+        result = await session.execute(query)
+        agency = result.scalar_one_or_none()
+        
+        if not agency:
+            raise HTTPException(status_code=404, detail="Agency not found")
+        
+        return {
+            "ori": agency.ori,
+            "name": agency.agency_name,
+            "type": agency.agency_type,
+            "address": agency.address,
+            "city": agency.city,
+            "zip_code": agency.zip_code,
+            "latitude": agency.latitude,
+            "longitude": agency.longitude,
+            "population": agency.population,
+            "state_abbr": agency.state_abbr,
+            "county_id": agency.county_id,
         }

@@ -273,6 +273,23 @@ async def fetch_agency_crimes(
                     await session.commit()
                     
                     logger.info(f"Updated {ori} enrichment: {status} ({len(current_enriched)}/{len(all_offenses)} offenses)")
+
+                    # Trigger aggregation calculation for all levels affected by this agency
+                    try:
+                        from backend.api.routes.stats import calculate_and_save_aggregations
+                        # 1. County Level
+                        if agency.county_id:
+                            await calculate_and_save_aggregations(session, "county", agency.county_id)
+                        # 2. State Level
+                        if agency.state_abbr:
+                            await calculate_and_save_aggregations(session, "state", agency.state_abbr)
+                        # 3. National Level
+                        await calculate_and_save_aggregations(session, "national", "NATIONAL_US")
+                        
+                        await session.commit()
+                        logger.info(f"Offline aggregations updated for {ori}")
+                    except Exception as agg_err:
+                        logger.error(f"Failed to update aggregations after enrichment for {ori}: {agg_err}")
         else:
             # For virtual IDs, determine status based on records found
             status = 'complete' if records else 'pending'

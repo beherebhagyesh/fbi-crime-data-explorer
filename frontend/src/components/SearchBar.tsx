@@ -26,7 +26,7 @@ export default function SearchBar({
     const inputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
-    // Debounced search
+    // Debounced search using Elasticsearch
     useEffect(() => {
         if (query.length < 2) {
             setResults([]);
@@ -39,18 +39,16 @@ export default function SearchBar({
             try {
                 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:49080';
                 const response = await fetch(
-                    `${apiUrl}/api/counties?limit=20`
+                    `${apiUrl}/api/system/search/counties?q=${encodeURIComponent(query)}&limit=10`
                 );
+
+                if (!response.ok) {
+                    throw new Error('Search failed');
+                }
+
                 const data = await response.json();
-
-                // Filter client-side for demo (in production, use ES search)
-                const filtered = data.filter((county: SearchResult) =>
-                    county.countyName.toLowerCase().includes(query.toLowerCase()) ||
-                    county.stateAbbr.toLowerCase().includes(query.toLowerCase())
-                ).slice(0, 10);
-
-                setResults(filtered);
-                setIsOpen(true);
+                setResults(data);
+                setIsOpen(data.length > 0);
             } catch (error) {
                 console.error('Search error:', error);
                 setResults([]);

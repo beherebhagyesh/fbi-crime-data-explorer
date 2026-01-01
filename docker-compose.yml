@@ -190,9 +190,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:49080
     container_name: fbi-frontend
     ports:
-      - "49084:3000"
+      - "49000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:49080
     depends_on:

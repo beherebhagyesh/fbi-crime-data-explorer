@@ -5,6 +5,7 @@ import { getOffenseConfig, OffenseCode, normalizeOffenseCode } from '@/lib/offen
 import { useInfiniteScroll } from '../InfiniteScroll';
 import CrimeStatsCard from '../CrimeStatsCard';
 import DetailedContextModal from '../DetailedContextModal';
+import { DataModeConfig, calculateDisplayValue, CalculatedValue } from '../DataModeSelector';
 
 interface County {
     county_id: string;
@@ -18,6 +19,7 @@ interface StateViewProps {
     stateName: string;
     selectedOffense: OffenseCode;
     year: number;
+    dataMode: DataModeConfig;
     onSelectCounty: (countyId: string) => void;
 }
 
@@ -28,8 +30,10 @@ export default function StateView({
     stateName,
     selectedOffense,
     year,
+    dataMode,
     onSelectCounty,
 }: StateViewProps) {
+
     const [counties, setCounties] = useState<County[]>([]);
     const [totalCount, setTotalCount] = useState<number>(0);
     const [offset, setOffset] = useState(0);
@@ -39,6 +43,7 @@ export default function StateView({
     const [error, setError] = useState<string | null>(null);
     const [stateStats, setStateStats] = useState<any>(null);
     const [allStats, setAllStats] = useState<any[]>([]);
+    const [aggregations, setAggregations] = useState<Record<string, any>>({});
     const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
     const [selectedDetailOffense, setSelectedDetailOffense] = useState<OffenseCode>(selectedOffense);
 
@@ -97,7 +102,24 @@ export default function StateView({
                 console.error('Failed to fetch state stats:', err);
             }
         };
+        const fetchAggregations = async () => {
+            try {
+                const response = await fetch(`${apiUrl}/api/stats/aggregations/state/${stateAbbr}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const aggMap = data.reduce((acc: any, curr: any) => {
+                        acc[curr.offense.toUpperCase()] = curr;
+                        return acc;
+                    }, {});
+                    setAggregations(aggMap);
+                }
+            } catch (err) {
+                console.error('Failed to fetch aggregations:', err);
+            }
+        };
+
         fetchStateStats();
+        fetchAggregations();
     }, [stateAbbr, selectedOffense, apiUrl]);
 
     // Load more counties
@@ -235,20 +257,70 @@ export default function StateView({
                                 }
                                 return acc;
                             }, {} as Record<string, any>)
-                        ).map((stat: any) => (
-                            <CrimeStatsCard
-                                key={stat.offense}
-                                offenseCode={stat.offense.toUpperCase() as OffenseCode}
-                                count={stat.total_count}
-                                year={stat.year}
-                                agenciesReporting={100}
-                                agenciesTotal={100}
-                                onDetailClick={() => {
-                                    setSelectedDetailOffense(stat.offense.toUpperCase() as OffenseCode);
-                                    setIsDetailModalOpen(true);
-                                }}
-                            />
-                        ))
+                        ).map((stat: any) => {
+                            const offenseKey = stat.offense.toUpperCase();
+                            const agg = aggregations[offenseKey];
+                            let calculatedVal: CalculatedValue | undefined;
+                            let displayLabel = `${stat.year} Data`;
+                            let displayCount = stat.total_count;
+
+                            if (dataMode.mode !== 'single' && agg) {
+                                if (dataMode.mode === 'sum') {
+                                    calculatedVal = { value: agg.sum_total, isNA: false };
+                                    displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Sum`;
+                                } else if (dataMode.mode === 'avg') {
+                                    calculatedVal = { value: Math.round(agg.avg_annual), isNA: false };
+                                    displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Avg`;
+                                } else if (dataMode.mode === 'growth') {
+                                    if (agg.growth_pct !== null) {
+                                        calculatedVal = {
+                                            value: agg.growth_pct,
+                                            isNA: false,
+                                            prefix: agg.growth_pct >= 0 ? '+' : '',
+                                            suffix: '%'
+                                        };
+                                        displayLabel = `${agg.growth_prev_year || agg.latest_year - 1} → ${agg.latest_year}`;
+                                    } else {
+                                        calculatedVal = { value: 0, isNA: true };
+                                        displayLabel = 'N/A';
+                                    }
+                                } else if (dataMode.mode === 'min') {
+                                    calculatedVal = {
+                                        value: agg.min_count,
+                                        isNA: false,
+                                        label: `${agg.min_year}`
+                                    };
+                                    displayLabel = `Lowest: ${agg.min_year}`;
+                                } else if (dataMode.mode === 'max') {
+                                    calculatedVal = {
+                                        value: agg.max_count,
+                                        isNA: false,
+                                        label: `${agg.max_year}`
+                                    };
+                                    displayLabel = `Highest: ${agg.max_year}`;
+                                }
+                            }
+
+                            return (
+                                <CrimeStatsCard
+                                    key={stat.offense}
+                                    offenseCode={stat.offense.toUpperCase() as OffenseCode}
+                                    count={displayCount}
+                                    year={stat.year}
+                                    agenciesReporting={100}
+                                    agenciesTotal={100}
+                                    calculatedValue={calculatedVal}
+                                    displayMode={dataMode.mode}
+                                    displayLabel={displayLabel}
+                                    population={agg?.population}
+                                    per100k={agg?.per_100k}
+                                    onDetailClick={() => {
+                                        setSelectedDetailOffense(stat.offense.toUpperCase() as OffenseCode);
+                                        setIsDetailModalOpen(true);
+                                    }}
+                                />
+                            );
+                        })
                     ) : (
                         <div className="col-span-full py-20 card text-center bg-[var(--bg-secondary)]/30 border-dashed border-2">
                             <p className="text-[var(--text-muted)] italic">No state-level crime statistics found.</p>

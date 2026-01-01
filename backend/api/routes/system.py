@@ -18,6 +18,64 @@ from backend.src.elasticsearch_loader import ElasticsearchLoader
 router = APIRouter()
 
 
+@router.get("/search/counties")
+async def search_counties(q: str = Query(..., min_length=2), limit: int = Query(10, le=50)):
+    """Search counties using Elasticsearch."""
+    try:
+        loader = ElasticsearchLoader()
+        await loader.connect()
+        
+        # Build fuzzy search query
+        query = {
+            "size": limit,
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"county_name": {"query": q, "fuzziness": "AUTO"}}},
+                        {"term": {"state_abbr": q.upper()}},
+                        {"wildcard": {"county_name.keyword": f"*{q}*"}}
+                    ]
+                }
+            },
+            "_source": ["county_id", "county_name", "state_abbr", "agencies_total"]
+        }
+        
+        results = await loader.search(query)
+        await loader.close()
+        
+        return [
+            {
+                "countyId": r["county_id"],
+                "countyName": r["county_name"],
+                "stateAbbr": r["state_abbr"],
+                "agencyCount": r.get("agencies_total", 0)
+            }
+            for r in results
+        ]
+    except Exception as e:
+        # Fallback to database search if ES not available
+        from sqlalchemy import select
+        from backend.src.models import County
+        
+        async with get_async_session() as session:
+            query_stmt = select(County).where(
+                County.county_name.ilike(f"%{q}%")
+            ).limit(limit)
+            result = await session.execute(query_stmt)
+            counties = result.scalars().all()
+            
+            return [
+                {
+                    "countyId": c.county_id,
+                    "countyName": c.county_name,
+                    "stateAbbr": c.state_abbr,
+                    "agencyCount": c.agency_count
+                }
+                for c in counties
+            ]
+
+
+
 @router.get("/health")
 async def health_check():
     """Full system health check."""

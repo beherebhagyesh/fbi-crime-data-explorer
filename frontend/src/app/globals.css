@@ -214,22 +214,40 @@ body {
 
 /* ========== STAT NUMBERS ========== */
 .stat-number {
-  font-size: 2.5rem;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
   font-weight: 800;
   color: var(--accent-primary);
   line-height: 1;
 }
 
 .stat-number-lg {
-  font-size: 4rem;
+  font-size: clamp(2rem, 8vw, 3rem);
   font-weight: 900;
+  line-height: 1.1;
+  text-align: right;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  display: block;
+  width: 100%;
 }
 
 .stat-label {
-  font-size: 0.875rem;
+  text-align: right;
+}
+
+.stat-label {
+  font-size: clamp(0.625rem, 1.5vw, 0.875rem);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Crime stats card fixed dimensions */
+.card-danger {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* ========== TREND INDICATORS ========== */
@@ -395,11 +413,29 @@ body {
     border-bottom: 1px solid var(--border-color);
   }
 
-  .stat-number {
-    font-size: 2rem;
+  /* Card adjustments for tablet/mobile */
+  .card-danger {
+    min-height: 160px;
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+
+  /* Extra small devices */
+  .card {
+    padding: 0.75rem;
+  }
+
+  .card-danger {
+    min-height: 140px;
   }
 
   .stat-number-lg {
-    font-size: 2.5rem;
+    font-size: clamp(1rem, 6vw, 1.75rem);
+  }
+
+  .stat-number-lg.stat-compact {
+    font-size: clamp(0.875rem, 5vw, 1.5rem);
   }
 }

@@ -5,6 +5,7 @@ import { getOffenseConfig, OffenseCode, ALL_OFFENSE_CODES, normalizeOffenseCode 
 import { fetchAgencyCrimeData, showToast } from '@/lib/agencyActions';
 import CrimeStatsCard from '../CrimeStatsCard';
 import DetailedContextModal from '../DetailedContextModal';
+import { DataModeConfig, calculateDisplayValue, CalculatedValue } from '../DataModeSelector';
 
 interface Agency {
     ori: string;
@@ -32,6 +33,7 @@ interface CountyViewProps {
     stateAbbr: string;
     selectedOffense: OffenseCode;
     year: number;
+    dataMode: DataModeConfig;
 }
 
 export default function CountyView({
@@ -40,9 +42,12 @@ export default function CountyView({
     stateAbbr,
     selectedOffense,
     year,
+    dataMode,
 }: CountyViewProps) {
+
     const [agencies, setAgencies] = useState<Agency[]>([]);
     const [crimeStats, setCrimeStats] = useState<CrimeStat[]>([]);
+    const [aggregations, setAggregations] = useState<Record<string, any>>({});
     const [isLoading, setIsLoading] = useState(true);
     // Track controllers to allow cancellation
     const [fetchingControllers, setFetchingControllers] = useState<Record<string, AbortController>>({});
@@ -93,8 +98,26 @@ export default function CountyView({
         }
     };
 
+    const fetchAggregations = async () => {
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:49080';
+            const response = await fetch(`${apiUrl}/api/stats/aggregations/county/${countyId}`);
+            if (response.ok) {
+                const data = await response.json();
+                const aggMap = data.reduce((acc: any, curr: any) => {
+                    acc[curr.offense.toUpperCase()] = curr;
+                    return acc;
+                }, {});
+                setAggregations(aggMap);
+            }
+        } catch (err) {
+            console.error('Failed to fetch aggregations:', err);
+        }
+    };
+
     useEffect(() => {
         fetchCountyData();
+        fetchAggregations();
         // Sync modal offense with sidebar selection
         if (selectedOffense && selectedOffense !== 'ALL') {
             setSelectedDetailOffense(selectedOffense);
@@ -169,8 +192,14 @@ export default function CountyView({
     // Get unique offenses with data
     const offensesWithData = Array.from(new Set(crimeStats.map(s => s.offense)));
 
+    const displayLabelHeader = dataMode.mode === 'sum' ? 'Total Sum' :
+        dataMode.mode === 'avg' ? 'Annual Average' :
+            dataMode.mode === 'growth' ? 'Year-over-Year Growth' :
+                dataMode.mode === 'min' ? 'Lowest Reported' :
+                    dataMode.mode === 'max' ? 'Peak Reported' : 'Crime Statistics';
+
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6 animate-fade-in h-full overflow-y-auto pr-2 custom-scrollbar">
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-4">
@@ -223,27 +252,79 @@ export default function CountyView({
                 <div>
                     <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                         <span>📈</span>
-                        <span>{year} Crime Statistics</span>
-                        <span className="text-sm font-normal text-[var(--text-muted)]">
-                            ({latestStats.length} offenses)
-                        </span>
+                        <span>{dataMode.mode === 'single' ? `${year} Crime Statistics` : `${displayLabelHeader}`}</span>
+                        {dataMode.mode === 'single' && (
+                            <span className="text-sm font-normal text-[var(--text-muted)]">
+                                ({latestStats.length} offenses)
+                            </span>
+                        )}
                     </h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {latestStats.map((stat) => (
-                            <CrimeStatsCard
-                                key={`${stat.offense}-${stat.year}`}
-                                offenseCode={stat.offense as OffenseCode}
-                                count={stat.totalCount}
-                                year={stat.year}
-                                agenciesReporting={stat.agenciesReporting}
-                                agenciesTotal={stat.agenciesTotal}
-                                onDetailClick={() => {
-                                    setSelectedDetailOffense(stat.offense as OffenseCode);
-                                    setIsDetailModalOpen(true);
-                                }}
-                            />
-                        ))}
+                        {latestStats.map((stat) => {
+                            const offenseKey = stat.offense.toUpperCase();
+                            const agg = aggregations[offenseKey];
+                            let calculatedVal: CalculatedValue | undefined;
+                            let displayLabel = `${stat.year} Data`;
+                            let displayCount = stat.totalCount;
+
+                            if (dataMode.mode !== 'single' && agg) {
+                                if (dataMode.mode === 'sum') {
+                                    calculatedVal = { value: agg.sum_total, isNA: false };
+                                    displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Sum`;
+                                } else if (dataMode.mode === 'avg') {
+                                    calculatedVal = { value: Math.round(agg.avg_annual), isNA: false };
+                                    displayLabel = `${agg.sum_years_start}-${agg.sum_years_end} Avg`;
+                                } else if (dataMode.mode === 'growth') {
+                                    if (agg.growth_pct !== null) {
+                                        calculatedVal = {
+                                            value: agg.growth_pct,
+                                            isNA: false,
+                                            prefix: agg.growth_pct >= 0 ? '+' : '',
+                                            suffix: '%'
+                                        };
+                                        displayLabel = `${agg.growth_prev_year || agg.latest_year - 1} → ${agg.latest_year}`;
+                                    } else {
+                                        calculatedVal = { value: 0, isNA: true };
+                                        displayLabel = 'N/A';
+                                    }
+                                } else if (dataMode.mode === 'min') {
+                                    calculatedVal = {
+                                        value: agg.min_count,
+                                        isNA: false,
+                                        label: `${agg.min_year}`
+                                    };
+                                    displayLabel = `Lowest: ${agg.min_year}`;
+                                } else if (dataMode.mode === 'max') {
+                                    calculatedVal = {
+                                        value: agg.max_count,
+                                        isNA: false,
+                                        label: `${agg.max_year}`
+                                    };
+                                    displayLabel = `Highest: ${agg.max_year}`;
+                                }
+                            }
+
+                            return (
+                                <CrimeStatsCard
+                                    key={`${stat.offense}-${stat.year}`}
+                                    offenseCode={stat.offense as OffenseCode}
+                                    count={displayCount}
+                                    year={stat.year}
+                                    agenciesReporting={stat.agenciesReporting}
+                                    agenciesTotal={stat.agenciesTotal}
+                                    calculatedValue={calculatedVal}
+                                    displayMode={dataMode.mode}
+                                    displayLabel={displayLabel}
+                                    population={agg?.population}
+                                    per100k={agg?.per_100k}
+                                    onDetailClick={() => {
+                                        setSelectedDetailOffense(stat.offense as OffenseCode);
+                                        setIsDetailModalOpen(true);
+                                    }}
+                                />
+                            );
+                        })}
                     </div>
                 </div>
             )}

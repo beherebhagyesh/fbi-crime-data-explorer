@@ -16,6 +16,7 @@ import StateView from './views/StateView';
 import CountyView from './views/CountyView';
 import SystemStatus from './SystemStatus';
 import ConsolePanel from './ConsolePanel';
+import DataModeSelector, { DataModeConfig } from './DataModeSelector';
 
 type Level = 'national' | 'state' | 'county';
 
@@ -118,7 +119,7 @@ function OffenseSidebarContent({
 export default function Dashboard() {
     const [navigation, setNavigation] = useState<NavigationState>({ level: 'national' });
     const [selectedOffense, setSelectedOffense] = useState<OffenseCode>('HOM');
-    const [year] = useState(2024);
+    const [dataMode, setDataMode] = useState<DataModeConfig>({ year: 2024, mode: 'single' });
     const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const handleNavigate = (level: Level) => {
@@ -195,8 +196,9 @@ export default function Dashboard() {
                             />
                         </div>
 
-                        {/* Right: Controls */}
+                        {/* Right: Data Mode + Controls */}
                         <div className="flex items-center gap-3 flex-shrink-0">
+                            <DataModeSelector config={dataMode} onChange={setDataMode} />
                             <SystemStatus />
                             <ThemeToggle />
                         </div>
@@ -242,11 +244,12 @@ export default function Dashboard() {
                 )}
 
                 {/* Main Content */}
-                <main className="flex-1 p-6 overflow-y-auto">
+                <main className="flex-1 p-6 overflow-hidden flex flex-col">
                     {navigation.level === 'national' && selectedOffense && (
                         <NationalView
                             selectedOffense={selectedOffense}
-                            year={year}
+                            year={dataMode.year}
+                            dataMode={dataMode}
                             onSelectState={handleSelectState}
                         />
                     )}
@@ -256,7 +259,8 @@ export default function Dashboard() {
                             stateAbbr={navigation.stateAbbr}
                             stateName={navigation.stateName || navigation.stateAbbr}
                             selectedOffense={selectedOffense}
-                            year={year}
+                            year={dataMode.year}
+                            dataMode={dataMode}
                             onSelectCounty={handleSelectCounty}
                         />
                     )}
@@ -267,7 +271,8 @@ export default function Dashboard() {
                             countyName={navigation.countyName || navigation.countyId}
                             stateAbbr={navigation.stateAbbr || ''}
                             selectedOffense={selectedOffense}
-                            year={year}
+                            year={dataMode.year}
+                            dataMode={dataMode}
                         />
                     )}
                 </main>

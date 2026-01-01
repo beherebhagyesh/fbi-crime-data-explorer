@@ -1,6 +1,7 @@
 'use client';
 
 import { getOffenseConfig, OffenseCode } from '@/lib/offenseConfig';
+import { CalculatedValue, AggregationMode } from './DataModeSelector';
 
 interface CrimeStatsCardProps {
     offenseCode: OffenseCode;
@@ -16,6 +17,12 @@ interface CrimeStatsCardProps {
     predictionConfidence?: 'high' | 'medium' | 'low';
     isLoading?: boolean;
     onDetailClick?: () => void;
+    // New props for calculated display
+    calculatedValue?: CalculatedValue;
+    displayMode?: AggregationMode;
+    displayLabel?: string;  // e.g., "2020-2024 Sum"
+    per100k?: number;
+    population?: number;
 }
 
 export default function CrimeStatsCard({
@@ -32,7 +39,13 @@ export default function CrimeStatsCard({
     predictionConfidence,
     isLoading,
     onDetailClick,
+    calculatedValue,
+    displayMode,
+    displayLabel,
+    per100k,
+    population,
 }: CrimeStatsCardProps) {
+
     const offense = getOffenseConfig(offenseCode);
 
     if (!offense) return null;
@@ -90,14 +103,51 @@ export default function CrimeStatsCard({
             </div>
 
             {/* Main Stat */}
-            <div className="mb-6">
+            <div className="mb-6 flex-1 flex flex-col justify-center overflow-hidden">
+                {/* Display mode badge */}
+                {displayLabel && (
+                    <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)] mb-1">
+                        {displayLabel}
+                    </span>
+                )}
+
                 <div
-                    className={`stat-number-lg animate-glow-text ${count >= 1000000 ? 'text-3xl md:text-4xl' : ''}`}
+                    className="stat-number-lg animate-glow-text"
                     style={{ color: offense.color }}
                 >
-                    {count.toLocaleString()}
+                    {calculatedValue ? (
+                        calculatedValue.isNA ? (
+                            <span className="text-[var(--text-muted)]">N/A</span>
+                        ) : (
+                            <>
+                                {/* Year label for min/max modes */}
+                                {calculatedValue.label && (
+                                    <span className="text-[0.5em] text-[var(--text-secondary)] mr-1">
+                                        {calculatedValue.label}:
+                                    </span>
+                                )}
+                                {/* Prefix for growth (+ or -) */}
+                                {calculatedValue.prefix}
+                                {calculatedValue.value.toLocaleString(undefined, {
+                                    maximumFractionDigits: calculatedValue.suffix === '%' ? 1 : 0
+                                })}
+                                {/* Suffix for growth (%) */}
+                                {calculatedValue.suffix}
+                            </>
+                        )
+                    ) : (
+                        count.toLocaleString()
+                    )}
                 </div>
-                <p className="stat-label">Incidents Reported</p>
+
+                <p className="stat-label">
+                    {displayMode === 'growth' ? 'Year-over-Year Change' :
+                        displayMode === 'sum' ? 'Total Incidents' :
+                            displayMode === 'avg' ? 'Annual Average' :
+                                displayMode === 'max' ? 'Peak Year' :
+                                    displayMode === 'min' ? 'Lowest Year' :
+                                        'Incidents Reported'}
+                </p>
             </div>
 
             {/* Context Stats */}
@@ -117,6 +167,15 @@ export default function CrimeStatsCard({
                             {statePercentage.toFixed(1)}%
                         </span>
                         <span className="text-[var(--text-secondary)]"> of state total</span>
+                    </p>
+                )}
+
+                {per100k !== undefined && per100k !== null && (
+                    <p className="text-sm">
+                        <span className="text-orange-500 font-bold">
+                            {per100k.toFixed(1)}
+                        </span>
+                        <span className="text-[var(--text-secondary)]"> per 100k pop.</span>
                     </p>
                 )}
 

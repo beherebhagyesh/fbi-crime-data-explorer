@@ -19,6 +19,8 @@ import {
     Cell
 } from 'recharts';
 import { getOffenseLabel, getOffenseConfig, OffenseCode } from '@/lib/offenseConfig';
+import AgencyDetailsModal from './AgencyDetailsModal';
+
 
 interface Inference {
     type: string;
@@ -34,7 +36,7 @@ interface DetailData {
     yearly_trend: { year: number; count: number; clearances?: number }[];
     monthly_breakdown: { date: string; count: number }[];
     inferences: Inference[];
-    agency_contribution?: { name: string; count: number }[];
+    agency_contribution?: { ori: string; name: string; count: number }[];
     stats_2024?: {
         total: number;
         clearances: number;
@@ -62,6 +64,8 @@ const DetailedContextModal: React.FC<DetailedContextModalProps> = ({
     const [data, setData] = useState<DetailData | null>(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'trends' | 'breakdown' | 'agencies'>('trends');
+    const [selectedAgency, setSelectedAgency] = useState<any>(null);
+    const [isAgencyModalOpen, setIsAgencyModalOpen] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -82,6 +86,20 @@ const DetailedContextModal: React.FC<DetailedContextModalProps> = ({
             console.error("Error fetching detail data:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleAgencyClick = async (ori: string) => {
+        try {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:49080';
+            const response = await fetch(`${API_URL}/api/counties/agency/${ori}`);
+            if (response.ok) {
+                const agencyData = await response.json();
+                setSelectedAgency(agencyData);
+                setIsAgencyModalOpen(true);
+            }
+        } catch (error) {
+            console.error("Error fetching agency details:", error);
         }
     };
 
@@ -234,7 +252,7 @@ const DetailedContextModal: React.FC<DetailedContextModalProps> = ({
                                             <BarChart3 className="w-12 h-12 mx-auto mb-2" />
                                             <p>No monthly breakdown found</p>
                                         </div>
-                                    ) : (
+                                    ) : (activeTab === 'trends' || activeTab === 'breakdown') ? (
                                         <ResponsiveContainer width="100%" height="100%">
                                             {activeTab === 'trends' ? (
                                                 <ReLineChart data={data?.yearly_trend || []}>
@@ -297,27 +315,38 @@ const DetailedContextModal: React.FC<DetailedContextModalProps> = ({
                                                     <Bar dataKey="count" stackId="a" fill="var(--accent-primary)" radius={[0, 0, 0, 0]} name="Incidents" />
                                                     <Bar dataKey="clearances" stackId="a" fill="#22c55e" radius={[4, 4, 0, 0]} name="Clearances" />
                                                 </BarChart>
-                                            ) : (
-                                                <BarChart data={data?.agency_contribution || []} layout="vertical" margin={{ left: 40, right: 20 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
-                                                    <XAxis type="number" stroke="var(--text-muted)" fontSize={12} hide />
-                                                    <YAxis
-                                                        dataKey="name"
-                                                        type="category"
-                                                        stroke="var(--text-muted)"
-                                                        fontSize={10}
-                                                        width={150}
-                                                        tickLine={false}
-                                                        axisLine={false}
-                                                    />
-                                                    <Tooltip
-                                                        contentStyle={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)' }}
-                                                        formatter={(value: any) => [Number(value).toLocaleString(), "Incidents"]}
-                                                    />
-                                                    <Bar dataKey="count" fill="var(--accent-primary)" radius={[0, 4, 4, 0]} barSize={20} />
-                                                </BarChart>
-                                            )}
+                                            ) : <></>}
                                         </ResponsiveContainer>
+                                    ) : null}
+
+                                    {activeTab === 'agencies' && data?.agency_contribution && (
+                                        <div className="w-full h-full overflow-y-auto pr-2 custom-scrollbar">
+                                            <div className="space-y-2">
+                                                {data.agency_contribution.map((agency, idx) => (
+                                                    <div
+                                                        key={idx}
+                                                        onClick={() => handleAgencyClick(agency.ori)}
+                                                        className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-color)] hover:border-[var(--accent-primary)] cursor-pointer transition-all group"
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center text-xs font-bold text-[var(--text-muted)] group-hover:text-[var(--accent-primary)]">
+                                                                {idx + 1}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-primary)]">
+                                                                    {agency.name}
+                                                                </p>
+                                                                <p className="text-[10px] font-mono text-[var(--text-muted)]">{agency.ori}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-bold text-[var(--accent-primary)]">{agency.count.toLocaleString()}</p>
+                                                            <p className="text-[10px] text-[var(--text-muted)]">Incidents</p>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -374,6 +403,15 @@ const DetailedContextModal: React.FC<DetailedContextModalProps> = ({
                     </button>
                 </div>
             </div>
+
+            {/* Agency Details Modal */}
+            {selectedAgency && (
+                <AgencyDetailsModal
+                    isOpen={isAgencyModalOpen}
+                    onClose={() => setIsAgencyModalOpen(false)}
+                    agency={selectedAgency}
+                />
+            )}
         </div>
     );
 };

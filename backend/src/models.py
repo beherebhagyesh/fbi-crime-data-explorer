@@ -221,3 +221,61 @@ class CircuitBreakerState(Base):
     
     def __repr__(self):
         return f"<CircuitBreaker {self.state_abbr}: {'OPEN' if self.is_open else 'CLOSED'}>"
+
+
+class CrimeAggregation(Base):
+    """
+    Pre-calculated aggregation values for crime statistics.
+    Stores Sum, Avg, Growth, Min, Max for each scope/offense combination.
+    Updated automatically after each enrichment.
+    """
+    __tablename__ = "crime_aggregations"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Scope identification
+    scope_type = Column(String(20), nullable=False)  # 'national', 'state', 'county'
+    scope_id = Column(String(50), nullable=False)    # 'NATIONAL_US', 'CA', 'Wake_NC'
+    offense = Column(String(10), nullable=False)     # 'HOM', 'ROB', etc.
+    
+    # Single Year Data (latest with data)
+    latest_year = Column(Integer, nullable=True)
+    latest_count = Column(Integer, nullable=True)
+    
+    # Sum (all available years)
+    sum_total = Column(Integer, nullable=True)
+    sum_years_start = Column(Integer, nullable=True)
+    sum_years_end = Column(Integer, nullable=True)
+    
+    # Average annual
+    avg_annual = Column(Float, nullable=True)
+    
+    # Growth (YoY from latest)
+    growth_pct = Column(Float, nullable=True)
+    growth_prev_year = Column(Integer, nullable=True)
+    growth_prev_count = Column(Integer, nullable=True)
+    
+    # Min/Max years
+    min_year = Column(Integer, nullable=True)
+    min_count = Column(Integer, nullable=True)
+    max_year = Column(Integer, nullable=True)
+    max_count = Column(Integer, nullable=True)
+    
+    # Population and Rates (from latest year with data)
+    population = Column(Integer, nullable=True)
+    per_100k = Column(Float, nullable=True)
+    
+    # Metadata
+    years_available = Column(JSONB, nullable=True)  # [2020, 2021, 2022, ...]
+
+    year_counts = Column(JSONB, nullable=True)      # {2020: 1234, 2021: 5678, ...}
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint("scope_type", "scope_id", "offense", name="uq_crime_agg"),
+        Index("idx_agg_scope", "scope_type", "scope_id"),
+        Index("idx_agg_offense", "offense"),
+    )
+    
+    def __repr__(self):
+        return f"<CrimeAggregation {self.scope_type}/{self.scope_id}/{self.offense}>"

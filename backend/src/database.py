@@ -88,9 +88,10 @@ async def drop_db():
 
 async def check_connection() -> bool:
     """Check if database connection is healthy."""
+    from sqlalchemy import text
     try:
         async with get_async_session() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
             return True
     except Exception:
         return False
